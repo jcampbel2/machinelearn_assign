@@ -1,3 +1,6 @@
+Machine Learning - Course Assignment
+========================================================
+
 ---
 title: "ML_Assign"
 author: "James Campbell"
@@ -5,18 +8,249 @@ date: "Tuesday, September 16, 2014"
 output: html_document
 ---
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+```{r setenviron, echo=TRUE}
+## set environment load and reshape data
+
+library("caret")
+library("stringr")
+library("ggplot2")
+library("plyr")
+library("rattle")
+library("rpart.plot")
+library("randomForest")
+library("scales")
+library("knitr")
+
+```
+```{r loaddata, echo=TRUE,cache=TRUE }
+
+md <- getwd()
+setwd("C:/Users/james_000/DataScPrj/MachineLearn/assigndata")
+
+rawdata <- read.csv(file = "pml-training.csv", as.is=TRUE)
+
+setwd(md)
+
+## columns to be retained
+keep <- c(TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,TRUE,TRUE,TRUE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,TRUE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,TRUE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE)
+basedata <- rawdata[,keep]
+
+##reset some columns to factors
+basedata$classe <- as.factor(basedata$classe)
+basedata$user_name <- as.factor(basedata$user_name)
+```
+
+## Executive Summary
+
+This study looks at the ability to use data gathered from sensors placed on human subjects to determine whether simple exercises where carried out correctly or if not the type of fault.  The model was constructed using the random forest model and then refined to minimise the features required while retaining the predictive accuracy.
+
+The final model build used a subset of 24 predictors who were seen to have had the highest impact on model prediction and appears to have an out of sample error of around 1%.
+
+
+## Data set 
+
+The original training data set provided was of 19622 observation with 160 variables.  
+
+These recorded 
+
+*Subject and timing data (who and when the activity happened)
+*Sensor data from 3 accelerometers on their body (upper arm, lower arm and belt) and one on the dumbell itself.
+*Outcome code (Classe) - see below for details
+
+Each sensor recorded 13 different readings continuously over a timeslice (so multiple times per lift) 
+
+The dataset also contains columns for 25 summary statistics per sensor for each timeslice. These summary columns only have data entered at the end of each timeslice (otherwise they are blank).
+
+Six subjects where used and carried out a single exercise (perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl).  From this Five possible outcomes recorded for each lift.  These were
+
+*A - Exercise carried out correctly
+*B - Throwing the elbows to the front 
+*C - Lifting the dumbbell only halfway
+*D - Lowering the dumbbell only halfway
+*E - Throwing the hips to the front
+
+The outcomes were confirmed by qualified instructors who monitored the exercise.
+
+Also included was a "testing" data set which contains 20 records.  None of these records represent a summary record.
+
+
+## Model Approach and Cross Validation 
+
+Once the summary and time columns were removed there were 52 feature variables and 1 response variable (classe).
+
+As the outcome variable is a factor/classification variable rather than a continuous one it was decided to use a tree approach rather than regression approach.  The model adopted was random forest using the *randomForest* R package  directly rather than via the *caret train* function. 
+
+The allow multiple builds and support cross validation, it was decided to split the dataset in 
+
+* Training (60%)
+* Testing (20%)
+* Validation (20%)
+
+The Validation set was only to be used for the final validation of the selected model using 1 run only. 
+
+```{r  crtDatasets, cache=TRUE}
+set.seed(1745)
+Intrain <- createDataPartition(y=basedata$classe,p=0.6, list=FALSE)
+training <- basedata[Intrain,c(-1,-2,-3,-4,-5,-6,-7)]
+base2  <- basedata[-Intrain,c(-1,-2,-3,-4,-5,-6,-7)]
+##then split testing into 2
+Intest <- createDataPartition(y=base2$classe,p=0.5, list=FALSE)
+testing <- base2[Intest,]
+validation <- base2[-Intest,]
+
+```
+
+## Initial Model
+
+The first model build was using all 52 variables.  This was then tested using the testing set
+
+```{r bld_mod1, cache=TRUE}
+
+modTree3 <- randomForest(x=training[,-53],y=training[,53], do.trace=FALSE, xtest=testing[,-53], ytest=testing[,53],ntree=100, importance=TRUE, keep.forest=TRUE)
+
+
+```
+
+###Model Accuracy
+
+By comparing the predictions from the random Forest model to the actual values for our **testing** dataset we can get a view of the model accuracy (Table 1). 
+
+
+```{r  Model Accuracy}
+
+modacc <- confusionMatrix(modTree3$test$predicted,testing$classe)
+oa <- modacc$overall[[1]] 
+
+```
+**Table 1**
+```{r}
+print(modacc)
+```
+
+As can be seen the overall model accuracy is very high at `r percent(oa) `.  
+
+See figure 1 below for plot of Error overall and by outcome as the number of trees increases.  From this it would appear that model error rates minimise from a forest of around 80 trees onwards.  
+
+
+**Figure 1 - Error rates for forest**
+
+```{r fig1, fig.height=7, fig.width=10}
+
+plot(modTree3, main="Model Error by outcome v's Number of tree in forest")
+legend("topright", colnames(modTree3$err.rate),col=1:6,cex=0.8,fill=1:6)
+
+
+```
+
+###Initial Model - Importance of  predicators
+
+We can also see by  looking at an ordered table and plot of predicators (Table 2 and Figure 2) that is quite likely we could simplify this model by removal of many of the predictors which have very low impact on the model.
+
+**Table 2**
 
 ```{r}
-summary(cars)
+ordimp <-order(-modTree3$importance[,6])
+kable(modTree3$importance[ordimp,], digits=3)
+
 ```
 
-You can also embed plots, for example:
+**Figure 2**
 
-```{r, echo=FALSE}
-plot(cars)
+```{r fig2, fig.height=10, fig.width=10}
+varImpPlot(modTree3, n.var=50, main="Figure 1 - Predictors in Order of Importance")
+
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+
+## Second Model
+
+The second model attempted to reduce the predicator set based on their overall importance to the model accuracy.  This was done by only using predictors whose importance was 0.03 or greater.
+
+```{r bld_mod2, cache=TRUE}
+
+keepvar <- c(modTree3$importance[,6]>0.03,FALSE)
+numvar <- sum(keepvar)
+modTree4 <- randomForest(x=training[,keepvar],y=training[,53], do.trace=FALSE, xtest=testing[,keepvar], ytest=testing[,53],ntree=100, importance=TRUE, keep.forest=TRUE)
+
+
+```
+This process gave us a subset of 24 predictors.  The model acciracy was then calculated and is displayed in Table 3 and Figure 3 below.
+
+```{r  mod2_acc}
+
+modacc <- confusionMatrix(modTree4$test$predicted,testing$classe)
+oa <- modacc$overall[[1]] 
+
+```
+**Table 3**
+```{r}
+print(modacc)
+```
+
+**Figure 3 - Error rates for forest**
+
+```{r fig3, fig.height=7, fig.width=10}
+
+plot(modTree3, main="Model Error by outcome v's Number of tree in forest")
+legend("topright", colnames(modTree4$err.rate),col=1:6,cex=0.8,fill=1:6)
+
+
+```
+
+###Reduced Model - Importance of  predicators
+
+A table and plot (Table4 and Figure 4) of predictor importance is shown below.
+
+
+**Table 4**
+
+```{r}
+ordimp <-order(-modTree4$importance[,6])
+kable(modTree4$importance[ordimp,], digits=3)
+
+```
+
+**Figure 4**
+
+```{r fig4, fig.height=10, fig.width=10}
+varImpPlot(modTree4, main="Figure 1 - Predictors in Order of Importance")
+```
+
+
+##Validation of Second Model
+
+The last part of the model design and build was to test it against our reserved validation set to see how well it performed on this data set
+
+```{r valid}
+
+val_out <- predict(modTree4, validation)
+
+```
+
+### Out of sample error
+
+**Table 5 - Confusion Matrix of Reduced Model and Validation set**
+
+```{r}
+confusionMatrix(val_out,validation$classe)
+```
+
+As can be seen in the confusion matrix below and as expected the accuracy level is slightly lower than the training or testign sets but is still very accurate at around 99% overall.  All outcomes are being predicted with very high Sensitivity and Specificity and this model appears to be very robust for this data.
+
+Based on above the **out of sample error should be around 1%**.  This should not vary between the outcome value significantly
+
+## Conclussions
+
+In conclusion the use of the random forest predictive model was very successful with this type of data,  It was also possible to use a smaller subset of predictors without having a significant impact on accuracy.  It may be possible to also reduce the number of trees required as error rates in predictions leveled off at around 60 trees but given the fairly rapid calculation times this wasnt seen as neccesary. 
+
+
+
+The working data used in this study was obtained from the below paper and used under public licence with permission
+
+*Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.*
+
+Read more: http://groupware.les.inf.puc-rio.br/har#ixzz3DlhUl8eS
+
+
